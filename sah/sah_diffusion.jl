@@ -13,31 +13,20 @@
 
 using Base: Real
 
-
-
-#TODO: Add explanation about meaning of  η >0  or  <0
-
-
-
-
 #TODO module SAH
 
 #TODO:-1. clean code
 #TODO:-0.5 get Nesterov momentum update  ------------------------  DONE √
-#TODO: 0. create repo in Gitlab or Github
+#TODO: 0. create repo in Gitlab or Github -----------------------  DONE √
 #TODO: 1. improve documentation
 #TODO: 2. add output with objective function (saved step by step)  DONE √
 #TODO: 3. calculate adjoints ------------------------------------  DONE √
 #TODO: 4. add penalty
-#TODO: 5. save microstructure if any
+#TODO: 5. save microstructure if any ----------------------------  DONE √
 
 using Gridap, Formatting
 
-# For running the example:
-using Plots 
-unicodeplots()
-
-
+#TODO: module?
 include("../common/sah_definitions.jl")
 include("../common/volume_constraint.jl")
 include("../common/optimization_methods.jl")
@@ -56,8 +45,8 @@ include("../common/optimization_methods.jl")
 #    but |A₁| < |A₀| ... indeed: A₀=1/(1+η)A₁ (η=-0.9 ==> A₀ = 10A₁ or A₁ = 0.1 A₀)
 
 """
-TODO: Add comments
-Jf = vector array with functions ... do the same with Jg
+TODO: Add usage and example
+
 """
 function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Real,
     f::Function,g::Function,ud::Function,Jf::Vector,Jg::Vector;
@@ -71,17 +60,14 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
     α     = 50
     α_min = 1e-5
     J     = 0.0   # definition to make it global
-    Jold  = 1e+10
-    ϵ_dJ  = 1e-10 # for gradient normalization: avoid division by zero
+    Jold  = 1e+30
+    ϵ_dJ  = 1e-15 # for gradient normalization: avoid division by zero
     fobj  = []
     accepted_iterations = []
     #mod_after_iter = 10 # after this, save vtk files each mod_iter iterations
     #mod_iter       = 10
     tol_error_rel = 1e-6  # limit tolerance for consecutive error in θ
     acc_error_rel = 2e-3  # when to increase α more agressively if step is accepted
-
-    #volume= 0.5 #! volume fraction <-- left to the user !!!  # deprecated
-    #Jg = [(x,g)->0,(x,g)->0,(x,g)->0] #! not yet defined !!
 
     
     pre_filename = output_prefix;
@@ -91,7 +77,7 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
     end
 
     if ismissing(dirichlet_tags) || isempty(dirichlet_tags)
-        error("parameter dirichlet_tags must be declared in 1st element in labels tuple.")
+        error("parameter dirichlet_tags must be declared as labels tuple.")
     end
 
     #* ==== MESH ===
@@ -116,7 +102,8 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
     Ud0 = TrialFESpace(V,x->0.0) # solution space with homogeneous Dirichlet BC's
 
     # use center coordinates to Evaluate and convert to array (compatible with θ)
-    xy = get_cell_points(Ω)
+    xy = get_cell_points(Ω) # all vertices in cell
+    xc = [sum(xy.cell_phys_point[i])/length(xy.cell_phys_point[i]) for i in 1:length(xy.cell_phys_point)] # center at cell
 
     
 
@@ -160,7 +147,7 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
         global p₀,p₁
         p₀ = u₀
         p₁ = u₁
-        lp1(v) = 0  #! THIS ...
+        lp1(v) = ∫(0.0*v)dΩ  #! THIS ...
     else
         println("   solving adjoint problems.")
         global p₀,p₁
@@ -186,8 +173,9 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
     end
 
     # Calculate optimal microstructure
-    A∇u₀_ = evaluate(A₀⋅∇(u₀),xy); A∇u₀=[sum(A∇u₀_[i])/length(A∇u₀_[i]) for i in 1:num_cells(Ω)];
-    A∇p₀_ = evaluate(A₀⋅∇(p₀),xy); A∇p₀=[sum(A∇p₀_[i])/length(A∇p₀_[i]) for i in 1:num_cells(Ω)];
+    A∇u₀_ = evaluate(A₀⋅∇(u₀),xc); 
+    A∇p₀_ = evaluate(A₀⋅∇(p₀),xc); 
+
     if use_microstructure
         println(" * Calculating microstructural term")
         # M(ξ) = ξ⊗ξ / A₀ξ⋅ξ
@@ -197,7 +185,11 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
         global ϕ_opt = fill(1e30,num_cells(Ω));
         global β_opt = zeros(num_cells(Ω))
         if dim==2
-            for e in num_cells(Ω)
+            A∇u₀=[VectorValue(sum(A∇u₀_[i][1]),sum(A∇u₀_[i][2]))/length(A∇u₀_[i]) for i in 1:num_cells(Ω)];
+            #A∇p₀=[sum(A∇p₀_[i])/length(A∇p₀_[i]) for i in 1:num_cells(Ω)];
+            A∇p₀=[VectorValue(sum(A∇p₀_[i][1]),sum(A∇p₀_[i][2]))/length(A∇p₀_[i]) for i in 1:num_cells(Ω)];
+
+            for e in 1:num_cells(Ω)
                 for β in range(0,stop=π,length=1000)
 
                     ξ = [cos(β),sin(β)]
@@ -213,7 +205,8 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
             # TODO 3D
         end
 
-        printfmt("    min ϕ: {:4.6f},  max ϕ: {:4.6f}",min(ϕ_opt...),max(ϕ_opt...))
+        printfmt("    min ϕ: {:4.2e},\t  max ϕ: {:4.2e}\n",min(ϕ_opt...),max(ϕ_opt...))
+        printfmt("    min β: {:4.3f},\t  max β: {:4.3f}\n",min(β_opt...),max(β_opt...))
     else
         # No microstructural term: Applies for Compliance
         println(" - Warning: No microstructure here")
@@ -259,15 +252,23 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
 
     if save_VTK
         # save first iteration
-        filename = pre_filename*"_0000"
+        filename  = pre_filename*"_0000"
+        filemicro = pre_filename*"_micro"
         if verbose
-            print(" solution saved in $(filename).vtu ...")
+            print(" solution and microstructure saved in $(filename).vtu")
+            if use_microstructure
+                print(" and $(filemicro).vtu, respectively")
+            end
+            print(" ... ")
         end
         
         if !is_autoadjoint
-            writevtk(Ω,filename,cellfields=["theta"=>θ,"U0"=>u₀,"U1"=>u₁,"Micro"=>ϕ_opt,"angle"=>β_opt,"gradJ"=>dJ])
+            writevtk(Ω,filename,cellfields=["theta"=>θ,"U0"=>u₀,"U1"=>u₁,"Micro"=>ϕ_opt,"angle"=>β_opt,"sensitivity"=>-dJ])
         else
-            writevtk(Ω,filename,cellfields=["theta"=>θ,"U0"=>u₀,"P0"=>p₀,"U1"=>u₁,"P1"=>p₁,"Micro"=>ϕ_opt,"angle"=>β_opt,"gradJ"=>dJ])
+            writevtk(Ω,filename,cellfields=["theta"=>θ,"U0"=>u₀,"P0"=>p₀,"U1"=>u₁,"P1"=>p₁,"Micro"=>ϕ_opt,"angle"=>β_opt,"sensitivity"=>-dJ])
+        end
+        if use_microstructure
+                writevtk(Ω,filemicro,cellfields=["phi_micro"=>ϕ_opt,"angle_micro"=>β_opt])
         end
 
         if verbose
@@ -311,7 +312,7 @@ function solve_sah_diffusion(geomodel,labels::Tuple,η::Real,A₀,θ,volume::Rea
 
             if save_VTK
                 snumber = fmt(FormatSpec("0>4s"),iter) # 4 digits with 0 at left
-                filename = pre_filename*"_"*snumber
+                filename  = pre_filename*"_"*snumber
                 if verbose
                     print(" solution saved in $(filename).vtu ...")
                 end
